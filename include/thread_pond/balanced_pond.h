@@ -122,7 +122,7 @@ public:
         }
     }
 
-   private:
+private:
     util::SafeTask task;
     std::queue<util::SafeTask> task_queue;
     std::mutex task_queue_locker;
@@ -138,8 +138,7 @@ public:
      * @param thread_numb 固定线程的数量
      * @param task_capactiry 线程池中任务的容量，默认是 unlimited
     */
-    explicit BalancedThreadPond(int thread_numb, int task_capactiry = HipeUnlimited) 
-        : FixedThreadPond(thread_numb, task_capactiry) {
+    explicit BalancedThreadPond(int thread_numb, int task_capactiry = HipeUnlimited) : FixedThreadPond(thread_numb, task_capactiry) {
         // 创建线程
         this->threads.reset(new OqThread[this->thread_numb]);
 
@@ -153,9 +152,10 @@ public:
 
 private:
     void worker(int index) {
-        OqThread & self = this->threads[index];        
+        OqThread & self = this->threads[index];      // 当前线程  
 
-        while (this->is_stop == false) {
+        // while (this->is_stop == false) {
+        while (!this->is_stop) {
             // 若当前任务队列中也没有任务
             if (self.notTask()) {
                 // 若是当前 self.isWaiting 返回true，表示 主线程调用了 waitForTask 方法，要等待当前线程执行完现有的任务, 然后在这里循环等待其他的线程结束自己的任务 

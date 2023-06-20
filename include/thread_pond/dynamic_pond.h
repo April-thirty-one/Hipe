@@ -26,6 +26,7 @@
 //===----------------------------------------------------------------------===//
 
 
+#include <iostream>
 #include "../header.h"
 
 namespace myHipe
@@ -59,12 +60,26 @@ public:
     */
     void addThreads(int tdNumb = 1) {
         assert(tdNumb >= 0);
+
         this->expect_thread_numb += tdNumb;
         std::lock_guard<std::mutex> locker(this->shared_locker);
         while (tdNumb > 0) {
+#if 1
             std::thread td(&DynamicThreadPond::worker, this);       
-                    // 这里只是创建了线程，但是没有给线程任务，任务是线程自己获得，所以是有竞争力的
             this->pond.emplace(std::make_pair<std::thread::id, std::thread>(td.get_id(), std::move(td)));   
+#else 
+            if (!this->dead_threads.empty()) {
+                // this->shared_locker.lock();
+                this->pond.emplace(std::make_pair<std::thread::id, std::thread>(this->dead_threads.front().get_id(), std::move(this->dead_threads.front())));   
+                this->dead_threads.pop();
+                // this->shared_locker.unlock();
+            }
+            else {
+                std::thread td(&DynamicThreadPond::worker, this);       
+                this->pond.emplace(std::make_pair<std::thread::id, std::thread>(td.get_id(), std::move(td)));   
+            }
+#endif
+                    // 这里只是创建了线程，但是没有给线程任务，任务是线程自己获得，所以是有竞争力的
                     // 线程池是 map 类型，方便查询，但是为什么不使用 std::unordered_map
             tdNumb -= 1;
         }
@@ -78,6 +93,7 @@ public:
     */
     void delThreads(int tdNumb = 1) {
         assert((tdNumb <= this->expect_thread_numb) && (tdNumb >= 0));
+
         this->expect_thread_numb -= tdNumb;
         this->shrink_numb += tdNumb;
         std::lock_guard<std::mutex> locker(this->shared_locker);
@@ -101,23 +117,24 @@ public:
      */
     void adjustThreads(int target_td_numb) {
         assert(target_td_numb >= 0);
-        if (target_td_numb > this->expect_thread_numb) {
+
+        if (target_td_numb > this->expect_thread_numb) {        // 增加线程池中线程的数量
             this->addThreads(target_td_numb - this->expect_thread_numb);
         }
-        else if (target_td_numb < this->expect_thread_numb) {
+        else if (target_td_numb < this->expect_thread_numb) {   // 减少线程池中的线程数量
             this->delThreads(this->expect_thread_numb - target_td_numb);
         }
     }
 
 
     /**
-     * 将不用的线程先加入到 this->dead_threads 中，这是为了避免刚刚释放就要申请的极端情况，循环利用资源
      * @brief 释放 this->dead_threads 中所有的线程
     */
     void joinDeadThreads() {
         std::thread td;
         while (true) {
             this->shared_locker.lock();
+
             if (this->dead_threads.empty() == false) {
                 td = std::move(this->dead_threads.front());
                 this->dead_threads.pop();
@@ -176,6 +193,7 @@ public:
         this->thread_cond_var.wait(locker, [this] () {
             return this->expect_thread_numb == this->running_thread_numb;
         });
+// std::cout << "[error]" << std::endl;
         this->is_waiting_for_thread = false;
     }
 
@@ -297,21 +315,21 @@ private:
     }
 
 private:
-     bool is_stop{false};                      // 是否停止线程池
-     std::atomic<int> running_thread_numb{0};  // 正在运行中的线程数量
-     std::atomic<int> expect_thread_numb{0};  // 期望正在运行的线程数量
-     bool is_waiting_for_task{false};         // 是否正在等待任务结束
-     bool is_waiting_for_thread{false};       // 线程调整是否需要调整
-     std::atomic<int> total_tasks{0};         // 任务的数量
-     std::queue<util::SafeTask> shared_task_queue{};  // 共享任务队列
-     std::mutex shared_locker;                  // 线程的共享互斥锁
-     std::condition_variable awake_cond_var{};  // 条件变量去唤醒停止的线程
-     std::condition_variable task_done_cond_var{};  // 负责任务结束
-     std::condition_variable thread_cond_var{};     // 线程开始或删除
-     std::map<std::thread::id, std::thread> pond;   //// 动态线程池
-     std::queue<std::thread> dead_threads;          // 保留不工作的线程
-     std::atomic<int> shrink_numb{0};               // 线程的收缩空间
-     std::atomic<int> tasks_loaded{0};  // 加载到线程中的任务数量
+    bool is_stop{false};                              // 是否停止线程池
+    std::atomic<int> running_thread_numb{0};       // 正在运行中的线程数量
+    std::atomic<int> expect_thread_numb{0};        // 期望正在运行的线程数量
+    bool is_waiting_for_task{false};                 // 是否正在等待任务结束
+    bool is_waiting_for_thread{false};               // 线程调整是否需要调整 / 是否正在等待线程数量调整
+    std::atomic<int> total_tasks{0};              // 任务的数量
+    std::queue<util::SafeTask> shared_task_queue{};  // 共享任务队列
+    std::mutex shared_locker;                       // 线程的共享互斥锁
+    std::condition_variable awake_cond_var{};        // 任务队列有新任务通知线程池中的线程
+    std::condition_variable task_done_cond_var{};   // 负责任务结束
+    std::condition_variable thread_cond_var{};      // 线程开始或删除
+    std::map<std::thread::id, std::thread> pond;    // 动态线程池
+    std::queue<std::thread> dead_threads;           // 保留不工作的线程
+    std::atomic<int> shrink_numb{0};             // 线程的收缩空间
+    std::atomic<int> tasks_loaded{0};            // 加载到线程中的任务数量
 };
 
 }   // !! myHipe

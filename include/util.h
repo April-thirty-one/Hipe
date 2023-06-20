@@ -64,7 +64,7 @@ void print(T && element, Args... args)
 }
 
 // =====================================
-//        线程通途输出流
+//        线程通用输出流
 //   它可以保证输出不会受到多线程的影响
 // =====================================
 class SyncStream
@@ -73,16 +73,14 @@ public:
     explicit SyncStream(std::ostream & out_stream = std::cout) : out_stream(out_stream) {}
 
     template <typename T>
-    void print(T && items) 
-    {
+    void print(T && items) {
         this->io_locker.lock();
         this->out_stream << std::forward<T>(items) << std::endl;
         this->io_locker.unlock();
     }
 
     template <class T, class... Args>
-    void print(T && item, Args... args)
-    {
+    void print(T && item, Args... args) {
         this->io_locker.lock();
         this->out_stream << std::forward<T>(item);
         this->print(std::forward<Args>(args)...);
@@ -111,13 +109,11 @@ template <typename U, typename DU = typename std::decay<U>::type>
 struct is_reference_wrapper 
 {
     template <typename T, typename D = typename T::type>
-    static constexpr bool check(T *) 
-    {
+    static constexpr bool check(T *) {
         return std::is_same<T, std::reference_wrapper<D>>::value;
     }
 
-    static constexpr bool check(...) 
-    {
+    static constexpr bool check(...) {
         return false;
     }
 
@@ -140,7 +136,7 @@ void repeat(Func && func, int times = 1)
 template <typename Func, typename... Args>
 void invoke(Func && func, Args... args)
 {
-    static_assert(isRunning<Func, Args...>::value, "[myHipeError]: Invoke non-runnable object.");
+    static_assert(isRunning<Func, Args...>::value, "[HipeError]: Invoke non-runnable object.");
     func(std::forward<Args>(args)...);
 }
 
@@ -239,16 +235,11 @@ inline std::string boundary(char element, int length = 10)
 template <typename T>
 class Futures
 {
-private:
-    std::vector<std::future<T>> futures;
-    std::vector<T> results;
-
 public:
     Futures() : futures(0), results(0) {}
 
     // 将返回的结果存放发哦容器 vector 中
-    std::vector<T> & get()
-    {
+    std::vector<T> & get() {
         this->results.resize(this->futures.size());
         for (size_t i = 0; i < this->futures.size(); i++) {
             this->results[i] = this->futures[i].get();
@@ -257,28 +248,28 @@ public:
         return this->results;
     }
 
-    std::future<T> & operator [] (size_t idx) const
-    {
+    std::future<T> & operator [] (size_t idx) const {
         return this->futures.at(idx);
     }
 
-    void push_back(std::future<T> && future)
-    {
+    void push_back(std::future<T> && future) {
         this->futures.push_back(std::forward<std::future<T>>(future));      // 这里写的和 Hipe 不同
     }
 
-    size_t size() const  
-    {
+    size_t size() const {
         return this->futures.size();
     }
 
     // 等待所有的 future 完成
-    void wait() const 
-    {
+    void wait() const {
         for (size_t i = 0; i < this->futures.size(); i++) {
             this->futures.at(i).wait();
         }
     }
+
+private:
+    std::vector<std::future<T>> futures;
+    std::vector<T> results;
 };
 
 // ======================================
@@ -287,18 +278,15 @@ public:
 class SpinLock
 {
 public:
-    void lock() 
-    {
+    void lock() {
         while (this->flag.test_and_set(std::memory_order_acquire)) {}
     }
 
-    void unlock() 
-    {
+    void unlock() {
         this->flag.clear(std::memory_order_release);
     }
 
-    bool try_lock()
-    {
+    bool try_lock() {
         return !flag.test_and_set();
     }
 
@@ -346,34 +334,29 @@ public:
 
     // 重新设置任务
     template <typename Func, typename = typename std::enable_if<isRunning<Func>::value>::type>
-    void reset(Func && func)
-    {
-        // unique_ptr::result(new) -- 执行一个新的内存，释放原先的
+    void reset(Func && func) {
+        // unique_ptr::result(new) -- 指向一个新的内存，释放原先的
         this->exe.reset(new GenericExec<Func>(std::forward<Func>(func)));
     }
 
     // 是否设置了任务
-    bool isSet()
-    {
+    bool isSet() {
         return static_cast<bool>(this->exe);
     }
 
     // 重载 ‘=’
-    SafeTask & operator = (SafeTask && other) 
-    {
+    SafeTask & operator = (SafeTask && other) {
         this->exe.reset(other.exe.release());
         return *this;
     }
 
     // runnable
-    void operator () () 
-    {
+    void operator () () {
         this->exe->call();
     }
 
 private:
-    struct BaseExec 
-    {
+    struct BaseExec {
         virtual void call() = 0;
         virtual ~BaseExec() = default;
     };
@@ -383,7 +366,7 @@ private:
         T foo;
         
         GenericExec(Func && func) : foo(std::forward<Func>(func)) {
-            static_assert(!is_reference_wrapper<Func>::value, "[myHipeError]: Use 'reference_wrapper' to save temporary variable is dangerous.");
+            static_assert(!is_reference_wrapper<Func>::value, "[HipeError]: Use 'reference_wrapper' to save temporary variable is dangerous.");
         }
 
         ~GenericExec() override = default;
@@ -394,6 +377,7 @@ private:
     };
 
 private:
+    // 动态创建，若使用 new GenericExec<Func> 则 exe 指向 GenericExec对象，但是智能调用 BaseExec 的方法
     std::unique_ptr<BaseExec> exe{nullptr};
 };
 
@@ -419,46 +403,39 @@ public:
 
     // 重置任务
     template <typename Func, typename = typename std::enable_if<isRunning<Func>::value>::type>
-    void reset(Func && func)
-    {
+    void reset(Func && func) {
         this->exe.reset(new GenericExec<Func>(std::forward<Func>(func)));
     }
 
     // 判断是否设置了
-    bool isSet() const 
-    {
+    bool isSet() const {
         return static_cast<bool>(this->exe);    
     }
 
     // 重载 '='
-    QuickTask & operator = (QuickTask && other)
-    {
+    QuickTask & operator = (QuickTask && other) {
         this->exe.reset(other.exe.release());
         return *this;
     }
 
     // runnable
-    void operator () () 
-    {
+    void operator () () {
         this->exe->call();
     }
 
 private:
-    struct BaseExec
-    {
+    struct BaseExec {
         virtual void call() = 0;
         virtual ~BaseExec() = default;
     };
 
     template <typename Func>
-    struct GenericExec : BaseExec
-    {
+    struct GenericExec : BaseExec {
         Func foo;
         GenericExec(Func && foo) : foo(std::forward<Func>(foo)) {}
         ~GenericExec() = default;
 
-        void call() override 
-        {
+        void call() override {
             // 这里是重载了 ()。
             this->foo();
         }

@@ -33,8 +33,7 @@ class ThreadPoolError : public std::exception
 public:
     explicit ThreadPoolError(std::string str) : message(str) {}
 
-    const char * what() const noexcept override
-    {
+    const char * what() const noexcept override {
         return message.data();
     }
 
@@ -56,32 +55,32 @@ public:
     ThreadBase() = default;
     virtual ~ThreadBase() = default;
 
-    // 过得点前任务数量
+    // 获得当前线程的任务数量
     int getTasksNumb() const {
         return this->task_numb.load();
     }
 
-    // 当前是否没有任务
+    // 当前是不是 没有任务
     bool notTask() const {
         return !this->task_numb;
     }
 
-    // handle join
+    // 等待当前线程结束
     void join() {
         this->handle.join();
     }
 
-    // 用 handle 绑定线程
+    // 将用户传入的 线程 使用 std::move() 绑定在 this->headle 上
     void bindHandle(std::thread && handle_) {
         this->handle = std::move(handle_);
     }
 
-    // 返回当前线程是否 闲
+    // 当前线程是否 空闲
     bool isWaiting() {
         return this->is_wait;
     }
 
-    // 等待当前线程所有的任务结束
+    // 给当前线程的任务队列进行上锁，等待当前线程中所有的任务结束
     void waitTasksDone() {
         this->is_wait = true;
         std::unique_lock<std::mutex> lock(this->task_queue_locker);
@@ -90,7 +89,7 @@ public:
             });
     }
 
-    // 清除等待标记
+    // 清除等待标记 / 将当前线程设置为 非空闲
     void cleanWaitingFlag() {
         this->is_wait = false;
     }
@@ -112,6 +111,7 @@ protected:
 // ==========================================================================================================
 //  基本线程池，定义了除了异步线程循环之外的所有基本线程池机制
 //  继承了 TheadBase 的 线程包装器类型(并不是这个类是 ThreadBase 的基类，而是模板参数 Type 是 ThreadBase 的基类)
+//  is_base_of<A, B> 表示 A 是 B 的基类
 // ===========================================================================================================
 template <class Type, typename = typename std::enable_if<std::is_base_of<ThreadBase, Type>::value>::type>
 class FixedThreadPond
@@ -129,7 +129,7 @@ protected:
 
         // 计算线程的数量
         if (threadNumb == 0) {
-            int temp = static_cast<int>(std::thread::hardware_concurrency());
+            int temp = static_cast<int>(std::thread::hardware_concurrency());       // temp = 当前服务器的 cpu 核心数
             this->thread_numb = (temp > 0) ? temp : 1;
         } 
         else {
@@ -138,22 +138,22 @@ protected:
 
         // 计算每个线程的任务容量
         if (taskCapacity == 0) {
-            this->thread_capacity = 0;
+            this->taskNum_of_thread_capacity = 0;
         }
         else if (taskCapacity > this->thread_numb) {
-            this->thread_capacity = taskCapacity / this->thread_numb;
+            this->taskNum_of_thread_capacity = taskCapacity / this->thread_numb;
         }
         else {
-            this->thread_capacity = 1;
+            this->taskNum_of_thread_capacity = 1;
         }
 
         // 设置负载均衡
         this->cousor_move_limit = this->getBastMoveLimit(threadNumb);
 
         // ===== test =====
-        std::cout << "FixedThreadPond constructor success." << std::endl;
-        std::cout << "thread number = " << this->thread_numb << std::endl;
-        std::cout << "thread capacity = " << this->thread_capacity << std::endl;
+        // std::cout << "FixedThreadPond constructor success." << std::endl;
+        // std::cout << "thread number = " << this->thread_numb << std::endl;
+        // std::cout << "thread capacity = " << this->thread_capacity << std::endl;
         // ===== test =====
     }
 
@@ -179,7 +179,8 @@ public:
         for (size_t i = 0; i < this->thread_numb; i++) {
             this->threads[i].waitTasksDone();
         }
-        // 这里因为均衡线程池的worker 中的任务窃取机制，当前线程执行完任务 不能和 设置标志位一起进行
+
+        // 这里因为均衡线程池的 worker 中的任务窃取机制，当前线程执行完任务 不能和 设置标志位一起进行
         for (size_t i = 0; i < this->thread_numb; i++) {
             this->threads[i].cleanWaitingFlag();
         }
@@ -198,7 +199,7 @@ public:
     }
 
     /**
-     * @brief 获取当前任务总数
+     * @brief 获取当前线程池中所有线程的任务总数
     */
     int getTasksRemain() {
         int result = 0;
@@ -209,7 +210,7 @@ public:
     }
 
     /**
-     * @brief 获取线程的数量
+     * @brief 获取线程池中线程的数量
     */
     int getThreadNumb() {
         return this->thread_numb;
@@ -247,7 +248,7 @@ public:
         std::future<RT> future(pack.get_future());
 
         Type * t = this->getLeastBusyThread();
-        t->enqueue(std::move(pack));
+        t->enqueue(std::move(pack));        // enqueue() 在 balanced_pond.h 和 steady_pond.h 中，加入任务队列
         return future;
     }
     /**
@@ -257,7 +258,7 @@ public:
     */
     template <typename Container>
     void submitInBatch(Container && container, size_t size) {
-        if (this->thread_capacity != 0) {
+        if (this->taskNum_of_thread_capacity != 0) {
             this->moveCursorToLeastBusy();
             for (size_t i = 0; i < size; i ++) {
                 // 提交一个任务
@@ -282,8 +283,7 @@ protected:
     // ====================================================
 
     /**
-     * @brief 移动 cursor 到当前线程池中最闲的线程
-     * @brief 若 cursor 指向的是当前最不繁忙的线程，则 cursor 不会移动
+     * @brief 移动 cursor 到当前线程池中最闲的线程, 若 cursor 指向的是当前最不繁忙的线程，则 cursor 不会移动
     */
     void moveCursorToLeastBusy() {
         int temp = cursor;
@@ -330,6 +330,7 @@ public:
             maxNumb = std::max(this->thread_numb / 4, 1);
             maxNumb = std::min(maxNumb, 8);
         }
+
         if (maxNumb >= this->thread_numb) {
             throw std::invalid_argument("[myHipeError]: The number of stealing threads must smaller than thread number and greater than zero.");
         }
@@ -356,9 +357,10 @@ public:
      */
     template <typename Func, typename... Args>
     void setRefuseCallBack(Func && func, Args&&... args) {
-        static_assert(util::isRunning<Func, Args...>::value, "[myHipeError]: The refuse callback is a non-runnable object.");
-        if (this->thread_capacity == 0) {
-            throw std::logic_error("[myHipeError]: The refuse callback will never be invoked bacause the capacity has heen set unlimited.");
+        static_assert(util::isRunning<Func, Args...>::value, "[HipeError]: The refuse callback is a non-runnable object.");
+
+        if (this->taskNum_of_thread_capacity == 0) {
+            throw std::logic_error("[HipeError]: The refuse callback will never be invoked bacause the capacity has heen set unlimited.");
         }
         else {
             this->refuse_call_back.reset(std::bind(std::forward<Func>(func), std::forward<Args>(args)...));
@@ -369,9 +371,9 @@ public:
      * @brief 从vecotr中拉取一个溢出的任务，一致保存到下一个溢出任务
      * @brief 然后新的任务会取代旧的任务
      */
-     std::vector<util::SafeTask> & pullOverFlowTasks() {
+    std::vector<util::SafeTask> & pullOverFlowTasks() {
         return this->overflow_tasks;
-     }
+    }
 
 protected:
     Type * getThreadNow() {
@@ -386,7 +388,7 @@ protected:
      * @param tarCapacity 目标容量
     */
     bool admit(int tarCapacity = 1) {
-        if (this->thread_capacity == 0) {
+        if (this->taskNum_of_thread_capacity == 0) {
             return true;
         }
 
@@ -394,8 +396,10 @@ protected:
         // 若是将 this->threads 循环一遍之后，没有一个满足上述，返回 false
         int previous = cursor;
         auto spare = [this, tarCapacity] (Type & t) -> bool {
-            return (t.getTasksNumb() + tarCapacity) <= this->thread_capacity;
+            return (t.getTasksNumb() + tarCapacity) <= this->taskNum_of_thread_capacity;
         };
+
+        // 判断线程池中是否有线程可以加入 tarCapaCity 个任务
         while (!spare(this->threads[cursor])) {
             util::recyclePlus(cursor, 0, this->thread_numb);
             if (cursor == previous) {
@@ -451,16 +455,16 @@ protected:
 
 
 protected:
-    bool is_stop{false};       // 是否停止线程池
-    int thread_numb{0};      // 线程池中线程的数量
-    int cursor{0};          // 线程池的游标
-    int cousor_move_limit{0}; // 在任务窃取时(负载均衡机制)，游标可以移动的范围
-    int max_steal{0};        // 线程池可以容纳最多的线程数量
-    bool enable_steal_tasks{false};   // 是否可以使用 任务窃取
-    std::unique_ptr<Type[]> threads{nullptr};       // 指向线程池的指针（Type 是 ThreadBase）
-    int thread_capacity{0};  // 每个线程的任务容量
+    bool is_stop{false};            // 是否停止线程池
+    int thread_numb{0};             // 线程池中线程的数量
+    int cursor{0};                  // 线程池的游标
+    int cousor_move_limit{0};       // 在任务窃取时(负载均衡机制)，游标可以移动的范围
+    int max_steal{0};               // 线程池最多可以偷窃的任务数量
+    bool enable_steal_tasks{false}; // 是否可以使用 任务窃取
+    std::unique_ptr<Type[]> threads{nullptr};           // 指向线程池的指针（Type 是 ThreadBase）
+    int taskNum_of_thread_capacity{0};                             // 每个线程的任务容量
     std::vector<util::SafeTask> overflow_tasks{1};   // 提交失败的任务
-    util::SafeTask refuse_call_back;  // 任务溢出召回
+    util::SafeTask refuse_call_back;                    // 处理任务溢出，回调到 refuse_call_back 中
 };
 
 }   // !! namespace myHipd

@@ -1,7 +1,8 @@
+#include <iostream>
 #include "../../include/thread_pond/dynamic_pond.h"
 
 myHipe::util::SyncStream stream;
-const int thread_numb = 16;
+const int thread_numb = 4;
 
 void func1() 
 {
@@ -117,11 +118,22 @@ int main(int argc, char * args[])
 
     myHipe::DynamicThreadPond pond(thread_numb);
     pond.waitForThreads(); 
+#if 0
+    // 检查是否可以动态调整线程池中线程的数量
+    pond.addThreads();
+    pond.delThreads(2);
+    pond.waitForThreads();
+#endif 
+
+#if 0
+    // 检查是否可以正常关闭线程池
+    pond.close();
+#endif
     myHipe::util::print("\nthread-num = ", pond.getRunningThreadNumb());
     myHipe::util::print("tasks-remain = ", pond.getTasksRemain());
 
-    test_submit_task(pond);
-    test_submit_in_batch(pond);
+    // test_submit_task(pond);
+    // test_submit_in_batch(pond);
     test_motify_thread_numb(pond);
     return 0;
 }
